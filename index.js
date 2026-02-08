@@ -10,7 +10,7 @@ const app = express();
 
 app.use(express.json());
 
-console.log('🚀 Instagram Reels Bot запущен');
+console.log('🚀 Бот запущен. Админ ID:', ADMIN_ID);
 
 // Парсинг прокси
 const [proxyHost, proxyPort, proxyUser, proxyPass] = PROXY.split(':');
@@ -29,9 +29,10 @@ const axiosInstance = axios.create({
     },
     protocol: 'http'
   },
-  timeout: 30000
+  timeout: 15000
 });
 
+// Хранилище пользователей
 let users = [];
 
 // Команда /start
@@ -39,8 +40,10 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'пользователь';
   
+  // Добавляем пользователя
   if (!users.includes(chatId)) {
     users.push(chatId);
+    console.log(`👤 Добавлен пользователь: ${chatId} (${userName})`);
   }
   
   bot.sendMessage(chatId, 
@@ -57,112 +60,119 @@ bot.on('message', async (msg) => {
   
   if (!text || text.startsWith('/')) return;
   
-  console.log(`Получена ссылка от ${chatId}: ${text.substring(0, 50)}...`);
+  console.log(`Получена ссылка от ${chatId}: ${text}`);
   
   // Проверяем Instagram ссылку
   if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
     try {
       await bot.sendMessage(chatId, '⏳ Скачиваю видео...');
       
-      // Используем простой сервис для скачивания
-      // Метод 1: Через snapinsta.app
-      const response = await axiosInstance.get(`https://snapinsta.app/api/ajaxSearch`, {
-        params: {
-          q: text,
-          t: 'media',
-          lang: 'en'
-        },
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Referer': 'https://snapinsta.app/'
+      // Простой метод через сервис
+      const serviceUrl = 'https://instasave.ig';
+      
+      const response = await axiosInstance.post(
+        `${serviceUrl}/api/ig`,
+        { url: text },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Origin': serviceUrl,
+            'Referer': `${serviceUrl}/`
+          }
         }
-      });
+      );
       
       if (response.data && response.data.data) {
-        const videoUrl = response.data.data;
+        const videoData = response.data.data;
         
-        // Скачиваем видео
-        const videoResponse = await axiosInstance.get(videoUrl, {
-          responseType: 'arraybuffer'
-        });
+        // Ищем видео URL
+        let videoUrl = null;
+        if (videoData.video_url) {
+          videoUrl = videoData.video_url;
+        } else if (videoData.links && videoData.links[0] && videoData.links[0].url) {
+          videoUrl = videoData.links[0].url;
+        }
         
-        // Отправляем видео
-        await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
-          caption: '✅ Видео успешно скачано!'
-        });
-        
-      } else {
-        throw new Error('Видео не найдено');
-      }
-      
-    } catch (error) {
-      console.log('Ошибка скачивания:', error.message);
-      
-      // Альтернативный метод
-      try {
-        await bot.sendMessage(chatId, '🔄 Пробую альтернативный метод...');
-        
-        // Метод 2: Через savetik.co
-        const altResponse = await axiosInstance.post(
-          'https://savetik.co/api/ajaxSearch',
-          `q=${encodeURIComponent(text)}&lang=en`,
-          {
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Referer': 'https://savetik.co/'
-            }
-          }
-        );
-        
-        if (altResponse.data && altResponse.data.links && altResponse.data.links[0]) {
-          const videoUrl = altResponse.data.links[0].url;
+        if (videoUrl) {
+          console.log(`Найдено видео: ${videoUrl}`);
+          
+          // Скачиваем видео
           const videoResponse = await axiosInstance.get(videoUrl, {
             responseType: 'arraybuffer'
           });
           
+          // Отправляем видео
           await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
-            caption: '✅ Видео скачано через альтернативный метод!'
+            caption: '✅ Видео успешно скачано!'
           });
-        } else {
-          throw new Error('Видео не найдено');
+          
+          return;
         }
-        
-      } catch (altError) {
-        console.log('Альтернативный метод не сработал:', altError.message);
-        
-        await bot.sendMessage(chatId, 
-          '❌ Не удалось скачать видео.\n\n' +
-          'Попробуйте:\n' +
-          '1. Другую ссылку\n' +
-          '2. Убедитесь, что видео публичное\n' +
-          '3. Попробуйте позже\n\n' +
-          'Или используйте: snaptik.app или savetik.co'
-        );
       }
+      
+      throw new Error('Видео не найдено в ответе');
+      
+    } catch (error) {
+      console.log('Ошибка скачивания:', error.message);
+      
+      // Запасной вариант - отправляем инструкцию
+      await bot.sendMessage(chatId, 
+        `❌ Не удалось скачать видео автоматически.\n\n` +
+        `Вы можете скачать вручную через:\n` +
+        `• https://snaptik.app/\n` +
+        `• https://savetik.co/\n` +
+        `• https://instasave.ig/\n\n` +
+        `Просто вставьте туда ссылку и скачайте видео.`
+      );
     }
+  } else if (text.includes('instagram.com/')) {
+    await bot.sendMessage(chatId, 
+      '📹 Отправьте ссылку на Reels или пост с видео.\n' +
+      'Формат: https://www.instagram.com/reel/...'
+    );
   }
 });
 
 // Админ команды
-bot.onText(/\/broadcast (.+)/, (msg, match) => {
-  if (msg.chat.id === ADMIN_ID) {
-    const text = match[1];
-    let sent = 0;
-    
-    users.forEach(userId => {
-      bot.sendMessage(userId, `📢 ${text}`)
-        .then(() => sent++)
-        .catch(err => console.log('Ошибка рассылки:', err.message));
-    });
-    
-    bot.sendMessage(ADMIN_ID, `✅ Рассылка отправлена ${sent} пользователям`);
+bot.onText(/\/broadcast (.+)/, async (msg, match) => {
+  if (parseInt(msg.chat.id) !== ADMIN_ID) {
+    return bot.sendMessage(msg.chat.id, '⛔ Нет прав');
   }
+  
+  const text = match[1];
+  let sent = 0;
+  let failed = 0;
+  
+  // Рассылаем всем пользователям, включая админа если он в списке
+  for (const userId of users) {
+    try {
+      await bot.sendMessage(userId, `📢 ${text}`);
+      sent++;
+    } catch (error) {
+      console.log(`Ошибка рассылки ${userId}:`, error.message);
+      failed++;
+    }
+  }
+  
+  await bot.sendMessage(ADMIN_ID, 
+    `✅ Рассылка завершена:\n` +
+    `✓ Отправлено: ${sent}\n` +
+    `✗ Ошибок: ${failed}\n` +
+    `👥 Всего пользователей: ${users.length}`
+  );
 });
 
 bot.onText(/\/stats/, (msg) => {
-  if (msg.chat.id === ADMIN_ID) {
-    bot.sendMessage(ADMIN_ID, `📊 Пользователей: ${users.length}`);
+  if (parseInt(msg.chat.id) !== ADMIN_ID) {
+    return bot.sendMessage(msg.chat.id, '⛔ Нет прав');
   }
+  
+  bot.sendMessage(ADMIN_ID, 
+    `📊 Статистика бота:\n` +
+    `👥 Пользователей: ${users.length}\n` +
+    `🆔 Ваш ID: ${msg.chat.id}\n` +
+    `👑 Админ ID: ${ADMIN_ID}`
+  );
 });
 
 // Webhook endpoint
