@@ -1,0 +1,20 @@
+{
+  "name": "instagram-reels-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for downloading Instagram Reels",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.61.0",
+    "axios": "^1.6.0",
+    "instagram-url-direct": "^1.0.1",
+    "form-data": "^4.0.0",
+    "dotenv": "^16.3.0",
+    "@upstash/redis": "^1.22.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
