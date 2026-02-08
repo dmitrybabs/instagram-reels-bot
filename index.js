@@ -1,17 +1,27 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const express = require('express');
 
 // Конфигурация
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 const PROXY = process.env.PROXY;
 
+// Для Vercel
+const app = express();
+app.use(express.json());
+
 // Парсинг прокси
 const [proxyHost, proxyPort, proxyUser, proxyPass] = PROXY.split(':');
 
-// Создаем бота
-const bot = new TelegramBot(token, { polling: true });
+// Webhook URL для Vercel
+const VERCEL_URL = process.env.VERCEL_URL || 'https://instagram-reels-58dvegvsg-marvins-projects-5e6b2b18.vercel.app';
+const webhookUrl = `${VERCEL_URL}/bot${token}`;
+
+// Создаем бота с webhook
+const bot = new TelegramBot(token);
+bot.setWebHook(webhookUrl);
 
 // Прокси для axios
 const proxyConfig = {
@@ -24,7 +34,6 @@ const proxyConfig = {
   protocol: 'http'
 };
 
-// Создаем axios инстанс с прокси
 const axiosInstance = axios.create({
   proxy: proxyConfig,
   timeout: 30000,
@@ -33,58 +42,73 @@ const axiosInstance = axios.create({
   }
 });
 
-// Хранилище пользователей (временное)
+// Хранилище
 let users = new Set();
 
-// Функция для извлечения видео из Instagram
+// Простая функция для скачивания (используем рабочий API)
 async function downloadInstagramReels(url) {
   try {
-    console.log('Скачивание видео с URL:', url);
+    console.log('Скачиваем:', url);
     
-    // Получаем HTML страницы
-    const response = await axiosInstance.get(url);
+    // Используем рабочий сервис snaptik
+    const snaptikUrl = `https://www.snaptik.app/`;
+    
+    // Сначала получаем HTML страницы snaptik
+    const response = await axiosInstance.post(snaptikUrl, `url=${encodeURIComponent(url)}`, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://www.snaptik.app',
+        'Referer': 'https://www.snaptik.app/'
+      }
+    });
+    
     const html = response.data;
     
-    // Ищем видео URL в HTML
-    const videoRegex = /"video_url":"([^"]+\.mp4[^"]*)"/g;
-    const matches = [...html.matchAll(videoRegex)];
+    // Ищем download ссылку
+    const downloadRegex = /<a[^>]*href="([^"]*download[^"]*)"[^>]*>/i;
+    const match = html.match(downloadRegex);
     
-    if (matches.length > 0) {
-      // Берем первую найденную ссылку
-      const videoUrl = matches[0][1].replace(/\\u0026/g, '&');
-      console.log('Найдено видео URL:', videoUrl);
-      return videoUrl;
+    if (match && match[1]) {
+      return match[1].startsWith('http') ? match[1] : `https://www.snaptik.app${match[1]}`;
     }
     
     // Альтернативный поиск
-    const alternativeRegex = /"contentUrl":"([^"]+\.mp4[^"]*)"/g;
-    const altMatches = [...html.matchAll(alternativeRegex)];
+    const videoRegex = /<video[^>]*src="([^"]+\.mp4[^"]*)"[^>]*>/i;
+    const videoMatch = html.match(videoRegex);
     
-    if (altMatches.length > 0) {
-      const videoUrl = altMatches[0][1];
-      console.log('Найдено видео URL (альтернативный):', videoUrl);
-      return videoUrl;
+    if (videoMatch && videoMatch[1]) {
+      return videoMatch[1];
     }
     
-    // Еще один вариант поиска
-    const jsonRegex = /window\.__additionalDataLoaded\('extra',(.+?)\);/g;
-    const jsonMatches = [...html.matchAll(jsonRegex)];
-    
-    if (jsonMatches.length > 0) {
-      try {
-        const jsonData = JSON.parse(jsonMatches[0][1]);
-        if (jsonData.shortcode_media && jsonData.shortcode_media.video_url) {
-          return jsonData.shortcode_media.video_url;
-        }
-      } catch (e) {
-        console.log('Ошибка парсинга JSON:', e.message);
-      }
-    }
-    
-    throw new Error('Видео не найдено на странице');
+    throw new Error('Видео не найдено');
     
   } catch (error) {
-    console.error('Ошибка при скачивании:', error.message);
+    console.error('Ошибка snaptik:', error.message);
+    
+    // Запасной вариант: savetik.co
+    try {
+      const saveTikUrl = `https://savetik.co/api/ajaxSearch`;
+      const saveResponse = await axiosInstance.post(saveTikUrl, {
+        q: url,
+        lang: 'en'
+      }, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Origin': 'https://savetik.co',
+          'Referer': 'https://savetik.co/'
+        }
+      });
+      
+      if (saveResponse.data && saveResponse.data.data) {
+        const videoData = saveResponse.data.data;
+        if (videoData.links && videoData.links[0] && videoData.links[0].url) {
+          return videoData.links[0].url;
+        }
+      }
+    } catch (altError) {
+      console.error('Ошибка savetik:', altError.message);
+    }
+    
     throw error;
   }
 }
@@ -97,135 +121,97 @@ bot.onText(/\/start/, async (msg) => {
   await bot.sendMessage(chatId, 
     `👋 Привет! Я бот для скачивания Reels из Instagram.\n\n` +
     `Просто пришли мне ссылку на Reels, и я скачаю видео для тебя!\n\n` +
-    `Пример ссылки: https://www.instagram.com/reel/Cxample123/`
+    `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
   );
 });
 
-// Обработка ссылок на Reels
-bot.on('message', async (msg) => {
+// Обработка ссылок
+bot.onText(/instagram\.com\/reel\/|instagram\.com\/p\//, async (msg, match) => {
   const chatId = msg.chat.id;
-  const text = msg.text;
+  const url = match[0];
   
-  if (!text) return;
-  if (text.startsWith('/')) return;
-  
-  // Проверяем Instagram ссылку
-  if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
-    try {
-      await bot.sendMessage(chatId, '⏳ Скачиваю видео...');
-      
-      // Получаем прямую ссылку на видео
-      const videoUrl = await downloadInstagramReels(text);
-      
-      if (videoUrl) {
-        // Скачиваем видео
-        const videoResponse = await axiosInstance.get(videoUrl, {
-          responseType: 'arraybuffer'
-        });
-        
-        // Отправляем видео пользователю
-        await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
-          caption: '✅ Видео успешно скачано!'
-        });
-      }
-    } catch (error) {
-      console.error('Ошибка:', error);
-      
-      // Пробуем альтернативный метод
-      try {
-        await bot.sendMessage(chatId, '🔄 Пробую альтернативный метод...');
-        
-        // Используем внешний сервис как запасной вариант
-        const externalServiceUrl = `https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index?url=${encodeURIComponent(text)}`;
-        
-        const externalResponse = await axiosInstance.get(externalServiceUrl);
-        if (externalResponse.data && externalResponse.data.media) {
-          const externalVideoUrl = externalResponse.data.media;
-          const videoResponse = await axiosInstance.get(externalVideoUrl, {
-            responseType: 'arraybuffer'
-          });
-          
-          await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
-            caption: '✅ Видео скачано через альтернативный метод!'
-          });
-        } else {
-          throw new Error('Видео не найдено');
-        }
-      } catch (altError) {
-        console.error('Альтернативный метод тоже не сработал:', altError);
-        
-        await bot.sendMessage(chatId, 
-          '❌ Не удалось скачать видео.\n\n' +
-          'Попробуйте:\n' +
-          '1. Другую ссылку\n' +
-          '2. Убедитесь, что видео публичное\n' +
-          '3. Подождите и попробуйте позже\n\n' +
-          'Или используйте другие сервисы для скачивания Reels.'
-        );
-      }
-    }
-  } else if (text.includes('instagram.com/')) {
+  try {
+    await bot.sendMessage(chatId, '⏳ Скачиваю видео...');
+    
+    const videoUrl = await downloadInstagramReels(url);
+    
+    // Скачиваем видео
+    const videoResponse = await axiosInstance.get(videoUrl, {
+      responseType: 'arraybuffer'
+    });
+    
+    // Отправляем видео
+    await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
+      caption: '✅ Видео успешно скачано!'
+    });
+    
+  } catch (error) {
+    console.error('Ошибка:', error);
     await bot.sendMessage(chatId, 
-      '📹 Я умею скачивать только Reels и посты с видео.\n' +
-      'Пожалуйста, отправьте ссылку на Reels.\n\n' +
-      'Пример: https://www.instagram.com/reel/Cxample123/'
+      '❌ Не удалось скачать видео.\n\n' +
+      'Попробуйте другую ссылку или сервисы:\n' +
+      '• snaptik.app\n' +
+      '• savetik.co\n' +
+      '• instagramvideodownloader.com'
     );
   }
 });
 
-// Команда для админа - рассылка
+// Команда /broadcast
 bot.onText(/\/broadcast (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   
   if (chatId !== ADMIN_ID) {
-    await bot.sendMessage(chatId, '⛔ У вас нет прав для этой команды.');
+    await bot.sendMessage(chatId, '⛔ Нет прав');
     return;
   }
   
-  try {
-    const text = match[1];
-    await bot.sendMessage(chatId, `📢 Начинаю рассылку: "${text}"`);
-    
-    let success = 0;
-    let failed = 0;
-    
-    for (const userId of users) {
-      try {
-        await bot.sendMessage(userId, text);
-        success++;
-      } catch (error) {
-        console.error(`Ошибка отправки ${userId}:`, error);
-        failed++;
-      }
+  const text = match[1];
+  let success = 0;
+  
+  for (const userId of users) {
+    try {
+      await bot.sendMessage(userId, text);
+      success++;
+    } catch (error) {
+      console.error('Ошибка рассылки:', error);
     }
-    
-    await bot.sendMessage(chatId, 
-      `✅ Рассылка завершена!\n` +
-      `Успешно: ${success}\n` +
-      `Не удалось: ${failed}`
-    );
-  } catch (error) {
-    console.error('Ошибка рассылки:', error);
-    await bot.sendMessage(chatId, '❌ Ошибка при рассылке.');
-  }
-});
-
-// Команда для статистики
-bot.onText(/\/stats/, async (msg) => {
-  const chatId = msg.chat.id;
-  
-  if (chatId !== ADMIN_ID) {
-    await bot.sendMessage(chatId, '⛔ У вас нет прав для этой команды.');
-    return;
   }
   
-  await bot.sendMessage(chatId, 
-    `📊 Статистика:\n` +
-    `Пользователей: ${users.size}\n\n` +
-    `Команды:\n` +
-    `/broadcast текст - рассылка\n` +
-    `/stats - статистика`
-  );
+  await bot.sendMessage(chatId, `✅ Отправлено: ${success}`);
 });
 
-console.log('🤖 Бот запущен!');
+// Webhook endpoint
+app.post(`/bot${token}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// Корневой маршрут
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Instagram Reels Bot</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+          h1 { color: #333; }
+          .status { background: #f0f0f0; padding: 20px; border-radius: 10px; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <h1>🤖 Instagram Reels Bot</h1>
+        <div class="status">
+          <p><strong>Статус:</strong> ✅ Работает</p>
+          <p><strong>Пользователей:</strong> ${users.size}</p>
+          <p><strong>Webhook:</strong> ${webhookUrl}</p>
+        </div>
+        <p>Используйте бота в Telegram: @TgInstaReelsBot</p>
+      </body>
+    </html>
+  `);
+});
+
+// Экспортируем для Vercel
+module.exports = app;
