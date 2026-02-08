@@ -12,7 +12,8 @@
     "instagram-url-direct": "^1.0.1",
     "form-data": "^4.0.0",
     "dotenv": "^16.3.0",
-    "@upstash/redis": "^1.22.0"
+    "@upstash/redis": "^1.22.0",
+    "express": "^4.18.0"
   },
   "engines": {
     "node": "20.x"
