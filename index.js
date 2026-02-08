@@ -1,194 +1,179 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
-const axios = require('axios');
 
 const token = process.env.TELEGRAM_BOT_TOKEN || '8411517537:AAHUPmFUYwoMeeojTaGgqwFuC1eu4A6RqRs';
 const ADMIN_ID = 706357294;
-const PROXY = process.env.PROXY || '176.124.45.94:9391:HVWd6E:5Wdb7D';
 const app = express();
 
 app.use(express.json());
 
-console.log('🚀 Бот запущен. Админ ID:', ADMIN_ID);
+console.log('🚀 Быстрый Instagram бот запущен');
 
-// Парсинг прокси
-const [proxyHost, proxyPort, proxyUser, proxyPass] = PROXY.split(':');
-
-// Создаем бота
 const bot = new TelegramBot(token);
-
-// Прокси для axios
-const axiosInstance = axios.create({
-  proxy: {
-    host: proxyHost,
-    port: parseInt(proxyPort),
-    auth: {
-      username: proxyUser,
-      password: proxyPass
-    },
-    protocol: 'http'
-  },
-  timeout: 15000
-});
-
-// Хранилище пользователей
 let users = [];
+
+// Простая функция для проверки ссылки
+function isInstagramUrl(text) {
+  return text.includes('instagram.com/reel/') || 
+         text.includes('instagram.com/p/') || 
+         text.includes('instagram.com/tv/');
+}
 
 // Команда /start
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-  const userName = msg.from.first_name || 'пользователь';
+  const userName = msg.from.first_name || 'друг';
   
-  // Добавляем пользователя
   if (!users.includes(chatId)) {
     users.push(chatId);
-    console.log(`👤 Добавлен пользователь: ${chatId} (${userName})`);
   }
   
   bot.sendMessage(chatId, 
-    `👋 Привет, ${userName}! Я бот для скачивания Instagram Reels.\n\n` +
-    `Просто пришли мне ссылку на Reels, и я скачаю видео для тебя!\n\n` +
-    `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
-  ).catch(err => console.log('Ошибка отправки:', err.message));
+    `👋 Привет, ${userName}!\n\n` +
+    `📹 Я помогу скачать видео из Instagram.\n\n` +
+    `Просто пришли мне ссылку на Reels, и я дам инструкции.\n\n` +
+    `🚀 Работает моментально!`
+  ).catch(e => console.log('Ошибка:', e.message));
 });
 
-// Обработка ссылок на Instagram
+// Обработка ссылок
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   
   if (!text || text.startsWith('/')) return;
   
-  console.log(`Получена ссылка от ${chatId}: ${text}`);
-  
-  // Проверяем Instagram ссылку
-  if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
+  if (isInstagramUrl(text)) {
     try {
-      await bot.sendMessage(chatId, '⏳ Скачиваю видео...');
+      // Извлекаем короткий код из ссылки
+      const shortcode = text.match(/instagram\.com\/(reel|p|tv)\/([^\/?]+)/)?.[2];
       
-      // Простой метод через сервис
-      const serviceUrl = 'https://instasave.ig';
+      if (!shortcode) {
+        throw new Error('Неверная ссылка');
+      }
       
-      const response = await axiosInstance.post(
-        `${serviceUrl}/api/ig`,
-        { url: text },
+      // Быстрый ответ с вариантами скачивания
+      await bot.sendMessage(chatId, 
+        `✅ Ссылка получена: ${shortcode}\n\n` +
+        `📥 Варианты скачивания:\n\n` +
+        `1. 🌐 **InstaDownloader**\n` +
+        `   https://instadownloader.co/instagram-reel-downloader\n\n` +
+        `2. 🚀 **SaveFromNet**\n` +
+        `   https://savefromnet.com/instagram-reels-downloader\n\n` +
+        `3. 📱 **SnapInsta**\n` +
+        `   https://snapinsta.app/\n\n` +
+        `💡 Просто вставьте вашу ссылку на эти сайты.\n\n` +
+        `🔗 Ваша ссылка:\n\`${text}\``,
+        { parse_mode: 'Markdown' }
+      );
+      
+      // Отправляем быструю кнопку для перехода
+      await bot.sendMessage(chatId, 
+        'Быстрый переход:',
         {
-          headers: {
-            'Content-Type': 'application/json',
-            'Origin': serviceUrl,
-            'Referer': `${serviceUrl}/`
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '🌐 InstaDownloader', url: 'https://instadownloader.co/instagram-reel-downloader' },
+                { text: '🚀 SaveFromNet', url: 'https://savefromnet.com/instagram-reels-downloader' }
+              ],
+              [
+                { text: '📱 SnapInsta', url: 'https://snapinsta.app/' },
+                { text: '💾 Savetik', url: 'https://savetik.co/' }
+              ]
+            ]
           }
         }
       );
       
-      if (response.data && response.data.data) {
-        const videoData = response.data.data;
-        
-        // Ищем видео URL
-        let videoUrl = null;
-        if (videoData.video_url) {
-          videoUrl = videoData.video_url;
-        } else if (videoData.links && videoData.links[0] && videoData.links[0].url) {
-          videoUrl = videoData.links[0].url;
-        }
-        
-        if (videoUrl) {
-          console.log(`Найдено видео: ${videoUrl}`);
-          
-          // Скачиваем видео
-          const videoResponse = await axiosInstance.get(videoUrl, {
-            responseType: 'arraybuffer'
-          });
-          
-          // Отправляем видео
-          await bot.sendVideo(chatId, Buffer.from(videoResponse.data), {
-            caption: '✅ Видео успешно скачано!'
-          });
-          
-          return;
-        }
-      }
-      
-      throw new Error('Видео не найдено в ответе');
-      
     } catch (error) {
-      console.log('Ошибка скачивания:', error.message);
-      
-      // Запасной вариант - отправляем инструкцию
       await bot.sendMessage(chatId, 
-        `❌ Не удалось скачать видео автоматически.\n\n` +
-        `Вы можете скачать вручную через:\n` +
-        `• https://snaptik.app/\n` +
-        `• https://savetik.co/\n` +
-        `• https://instasave.ig/\n\n` +
-        `Просто вставьте туда ссылку и скачайте видео.`
+        `❌ Ошибка обработки ссылки.\n\n` +
+        `Проверьте правильность ссылки и попробуйте снова.`
       );
     }
-  } else if (text.includes('instagram.com/')) {
-    await bot.sendMessage(chatId, 
-      '📹 Отправьте ссылку на Reels или пост с видео.\n' +
-      'Формат: https://www.instagram.com/reel/...'
-    );
   }
 });
 
 // Админ команды
 bot.onText(/\/broadcast (.+)/, async (msg, match) => {
-  if (parseInt(msg.chat.id) !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, '⛔ Нет прав');
-  }
+  if (parseInt(msg.chat.id) !== ADMIN_ID) return;
   
   const text = match[1];
   let sent = 0;
-  let failed = 0;
   
-  // Рассылаем всем пользователям, включая админа если он в списке
   for (const userId of users) {
     try {
       await bot.sendMessage(userId, `📢 ${text}`);
       sent++;
-    } catch (error) {
-      console.log(`Ошибка рассылки ${userId}:`, error.message);
-      failed++;
+    } catch (e) {
+      console.log('Ошибка рассылки:', e.message);
     }
   }
   
-  await bot.sendMessage(ADMIN_ID, 
-    `✅ Рассылка завершена:\n` +
-    `✓ Отправлено: ${sent}\n` +
-    `✗ Ошибок: ${failed}\n` +
-    `👥 Всего пользователей: ${users.length}`
-  );
+  bot.sendMessage(ADMIN_ID, `✅ Рассылка: ${sent}/${users.length}`);
 });
 
 bot.onText(/\/stats/, (msg) => {
-  if (parseInt(msg.chat.id) !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, '⛔ Нет прав');
-  }
+  if (parseInt(msg.chat.id) !== ADMIN_ID) return;
   
   bot.sendMessage(ADMIN_ID, 
-    `📊 Статистика бота:\n` +
+    `📊 Статистика:\n` +
     `👥 Пользователей: ${users.length}\n` +
-    `🆔 Ваш ID: ${msg.chat.id}\n` +
-    `👑 Админ ID: ${ADMIN_ID}`
+    `🆔 Ваш ID: ${msg.chat.id}`
   );
 });
 
-// Webhook endpoint
+// Простая команда помощи
+bot.onText(/\/help/, (msg) => {
+  bot.sendMessage(msg.chat.id,
+    `❓ Помощь:\n\n` +
+    `/start - Начать работу\n` +
+    `/help - Эта справка\n` +
+    `\n` +
+    `📹 Просто отправьте ссылку на Instagram Reels!\n` +
+    `Примеры:\n` +
+    `• https://www.instagram.com/reel/ABC123/\n` +
+    `• https://www.instagram.com/p/XYZ456/`
+  );
+});
+
+// Webhook
 app.post(`/bot${token}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// Статус
+// Статус страница
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🤖 Instagram Reels Bot</h1>
-    <p><strong>Статус:</strong> ✅ Работает</p>
-    <p><strong>Пользователей:</strong> ${users.length}</p>
-    <p><strong>Админ:</strong> ${ADMIN_ID}</p>
-    <p><a href="https://t.me/TgInstaReelsBot">@TgInstaReelsBot</a></p>
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Instagram Reels Bot</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+          h1 { color: #333; }
+          .stats { background: #f5f5f5; padding: 20px; border-radius: 10px; }
+          .btn { display: inline-block; background: #0088cc; color: white; padding: 10px 20px; 
+                 border-radius: 5px; text-decoration: none; margin: 5px; }
+        </style>
+      </head>
+      <body>
+        <h1>🤖 Instagram Reels Bot</h1>
+        <div class="stats">
+          <p><strong>Статус:</strong> ✅ Работает</p>
+          <p><strong>Пользователей:</strong> ${users.length}</p>
+          <p><strong>Скорость:</strong> ⚡ Мгновенная</p>
+        </div>
+        <p>
+          <a href="https://t.me/TgInstaReelsBot" class="btn">💬 Открыть бота</a>
+          <a href="https://github.com" class="btn">📁 Исходный код</a>
+        </p>
+      </body>
+    </html>
   `);
 });
 
