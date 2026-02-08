@@ -3,86 +3,71 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
 const token = process.env.TELEGRAM_BOT_TOKEN || '8411517537:AAHUPmFUYwoMeeojTaGgqwFuC1eu4A6RqRs';
+const ADMIN_ID = 706357294;
 const app = express();
 
-// Критически важно: парсим raw body правильно
-app.use(express.json({
-  verify: function(req, res, buf) {
-    req.rawBody = buf.toString();
-  }
-}));
+app.use(express.json());
 
-console.log('🚀 Бот запускается...');
+console.log('🚀 Бот запущен');
 
-// Создаем бота
-const bot = new TelegramBot(token, {
-  // Добавляем опции для избежания 429 ошибок
-  polling: false
-});
+// Создаем бота БЕЗ автоматической установки webhook
+const bot = new TelegramBot(token);
 
-// Webhook URL
-const webhookUrl = `https://instagram-reels-bot-pink.vercel.app/bot${token}`;
-
-// Устанавливаем webhook
-bot.setWebHook(webhookUrl)
-  .then(() => console.log('✅ Webhook установлен на:', webhookUrl))
-  .catch(err => console.log('❌ Ошибка webhook:', err.message));
+// Хранилище пользователей
+let users = [];
 
 // Команда /start
 bot.onText(/\/start/, (msg) => {
-  console.log('🎯 Получен /start от:', msg.chat.id);
+  const chatId = msg.chat.id;
+  const userName = msg.from.first_name || 'пользователь';
   
-  bot.sendMessage(msg.chat.id, 
-    `✅ Бот работает! Привет!\n\n` +
-    `Отправь мне ссылку на Instagram Reels.\n` +
+  if (!users.includes(chatId)) {
+    users.push(chatId);
+  }
+  
+  console.log(`👤 Новый пользователь: ${chatId} (${userName})`);
+  
+  bot.sendMessage(chatId, 
+    `👋 Привет, ${userName}! Я бот для скачивания Instagram Reels.\n\n` +
+    `Просто пришли мне ссылку на Reels.\n` +
     `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
-  ).catch(err => console.log('❌ Ошибка отправки:', err.message));
+  ).catch(err => {
+    console.log('❌ Ошибка отправки:', err.message);
+  });
 });
 
 // Обработка ссылок
 bot.on('message', (msg) => {
+  const chatId = msg.chat.id;
   const text = msg.text;
+  
   if (!text || text.startsWith('/')) return;
   
-  console.log('📨 Сообщение:', text.substring(0, 50));
+  console.log(`📨 Сообщение от ${chatId}: ${text.substring(0, 50)}...`);
   
   if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
-    bot.sendMessage(msg.chat.id, 
+    bot.sendMessage(chatId, 
       '⏳ Скачиваю видео...\n' +
-      'Функция скачивания скоро будет добавлена!'
+      'Сейчас функция в разработке. Скоро будет доступно!'
     ).catch(err => console.log('❌ Ошибка:', err.message));
   }
 });
 
-// Webhook endpoint - ВАЖНО: обрабатываем raw body
+// Админ команды
+bot.onText(/\/stats/, (msg) => {
+  if (msg.chat.id === ADMIN_ID) {
+    bot.sendMessage(ADMIN_ID, `📊 Пользователей: ${users.length}`);
+  }
+});
+
+// Webhook endpoint
 app.post(`/bot${token}`, (req, res) => {
-  console.log('📨 POST запрос получен');
-  
-  // Логируем заголовки
-  console.log('📋 Content-Type:', req.headers['content-type']);
-  console.log('📦 Raw body длина:', req.rawBody?.length || 0);
-  
   try {
-    // Пробуем парсить тело
-    let update;
-    if (req.rawBody) {
-      update = JSON.parse(req.rawBody);
-    } else if (req.body && Object.keys(req.body).length > 0) {
-      update = req.body;
-    } else {
-      console.log('⚠️ Нет данных для парсинга');
-      return res.status(400).send('No data');
-    }
-    
-    console.log('🔄 Обрабатываю update ID:', update.update_id);
-    bot.processUpdate(update);
-    console.log('✅ Update обработан');
-    
+    bot.processUpdate(req.body);
     res.sendStatus(200);
   } catch (error) {
-    console.log('❌ Ошибка парсинга/обработки:', error.message);
-    console.log('📦 Тело запроса:', req.rawBody?.substring(0, 200) || 'Нет тела');
-    res.status(500).send('Error: ' + error.message);
+    console.log('❌ Ошибка:', error.message);
+    res.status(500).send('Error');
   }
 });
 
@@ -91,7 +76,8 @@ app.get('/', (req, res) => {
   res.send(`
     <h1>🤖 Instagram Reels Bot</h1>
     <p><strong>Статус:</strong> ✅ Работает</p>
-    <p><a href="https://t.me/TgInstaReelsBot">Открыть бота в Telegram</a></p>
+    <p><strong>Пользователей:</strong> ${users.length}</p>
+    <p><a href="https://t.me/TgInstaReelsBot">Открыть бота</a></p>
   `);
 });
 
