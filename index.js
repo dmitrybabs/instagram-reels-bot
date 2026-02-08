@@ -2,56 +2,62 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token = process.env.TELEGRAM_BOT_TOKEN || '8411517537:AAHUPmFUYwoMeeojTaGgqwFuC1eu4A6RqRs';
 const app = express();
+
+app.use(express.json());
+
+// Логируем все входящие запросы
+app.use((req, res, next) => {
+  console.log(`📨 ${req.method} ${req.url}`);
+  if (req.body) {
+    console.log('📦 Body:', JSON.stringify(req.body).substring(0, 200));
+  }
+  next();
+});
 
 // Webhook URL
 const webhookUrl = `https://instagram-reels-bot-pink.vercel.app/bot${token}`;
+console.log('🚀 Webhook URL:', webhookUrl);
 
-// Создаем бота с webhook
+// Создаем бота
 const bot = new TelegramBot(token);
-bot.setWebHook(webhookUrl);
 
-// Простое хранилище
-let users = [];
+// Устанавливаем webhook
+bot.setWebHook(webhookUrl)
+  .then(() => console.log('✅ Webhook установлен'))
+  .catch(err => console.log('❌ Ошибка webhook:', err.message));
 
 // Команда /start
 bot.onText(/\/start/, (msg) => {
+  console.log('🎯 Получен /start от:', msg.chat.id);
   const chatId = msg.chat.id;
-  if (!users.includes(chatId)) users.push(chatId);
   
-  bot.sendMessage(chatId, 
-    '👋 Привет! Отправь мне ссылку на Instagram Reels.'
-  ).catch(e => console.log('Ошибка отправки:', e.message));
-});
-
-// Обработка ссылок
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  
-  if (!text || text.startsWith('/')) return;
-  
-  if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
-    bot.sendMessage(chatId, 
-      '⏳ Пробую скачать видео...\n\n' +
-      'Сейчас использую временную версию. Скоро добавлю скачивание!'
-    ).catch(e => console.log('Ошибка:', e.message));
-  }
+  bot.sendMessage(chatId, '✅ Бот работает! Привет!')
+    .then(() => console.log('✅ Ответ отправлен'))
+    .catch(err => console.log('❌ Ошибка отправки:', err.message));
 });
 
 // Webhook endpoint
 app.post(`/bot${token}`, (req, res) => {
-  bot.processUpdate(req.body);
+  console.log('🔄 Обрабатываю update...');
+  
+  try {
+    bot.processUpdate(req.body);
+    console.log('✅ Update обработан');
+  } catch (error) {
+    console.log('❌ Ошибка processUpdate:', error.message);
+  }
+  
   res.sendStatus(200);
 });
 
 // Статус страница
 app.get('/', (req, res) => {
   res.send(`
-    <h1>✅ Бот работает</h1>
-    <p>Пользователей: ${users.length}</p>
-    <p>Webhook установлен</p>
+    <h1>🤖 Бот работает</h1>
+    <p>Webhook: ${webhookUrl}</p>
+    <p>Отправьте /start боту в Telegram</p>
   `);
 });
 
