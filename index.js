@@ -5,9 +5,9 @@ const express = require('express');
 const token = process.env.TELEGRAM_BOT_TOKEN || '8411517537:AAHUPmFUYwoMeeojTaGgqwFuC1eu4A6RqRs';
 const app = express();
 
-// Важно: парсим raw body
+// Критически важно: парсим raw body правильно
 app.use(express.json({
-  verify: (req, res, buf) => {
+  verify: function(req, res, buf) {
     req.rawBody = buf.toString();
   }
 }));
@@ -15,80 +15,83 @@ app.use(express.json({
 console.log('🚀 Бот запускается...');
 
 // Создаем бота
-const bot = new TelegramBot(token);
+const bot = new TelegramBot(token, {
+  // Добавляем опции для избежания 429 ошибок
+  polling: false
+});
 
 // Webhook URL
 const webhookUrl = `https://instagram-reels-bot-pink.vercel.app/bot${token}`;
-console.log('🌐 Webhook URL:', webhookUrl);
 
 // Устанавливаем webhook
 bot.setWebHook(webhookUrl)
-  .then(() => console.log('✅ Webhook установлен'))
+  .then(() => console.log('✅ Webhook установлен на:', webhookUrl))
   .catch(err => console.log('❌ Ошибка webhook:', err.message));
 
 // Команда /start
 bot.onText(/\/start/, (msg) => {
-  console.log('🎯 Получен /start от:', msg.chat.id, 'имя:', msg.from?.first_name);
+  console.log('🎯 Получен /start от:', msg.chat.id);
   
   bot.sendMessage(msg.chat.id, 
-    `✅ Привет, ${msg.from.first_name || 'друг'}! Бот работает!\n\n` +
-    `Отправь мне ссылку на Instagram Reels.`
+    `✅ Бот работает! Привет!\n\n` +
+    `Отправь мне ссылку на Instagram Reels.\n` +
+    `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
   ).catch(err => console.log('❌ Ошибка отправки:', err.message));
 });
 
-// Webhook endpoint
-app.post(`/bot${token}`, (req, res) => {
-  console.log('📨 Получен POST запрос');
-  console.log('📦 Raw body:', req.rawBody ? req.rawBody.substring(0, 200) : 'Нет тела');
-  console.log('📦 Parsed body:', req.body);
+// Обработка ссылок
+bot.on('message', (msg) => {
+  const text = msg.text;
+  if (!text || text.startsWith('/')) return;
   
-  try {
-    if (!req.body || Object.keys(req.body).length === 0) {
-      console.log('⚠️ Пустое тело, отправляем 400');
-      return res.status(400).send('Empty body');
-    }
-    
-    bot.processUpdate(req.body);
-    console.log('✅ Update обработан успешно');
-    res.sendStatus(200);
-  } catch (error) {
-    console.log('❌ Ошибка processUpdate:', error.message);
-    res.status(500).send('Error');
+  console.log('📨 Сообщение:', text.substring(0, 50));
+  
+  if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
+    bot.sendMessage(msg.chat.id, 
+      '⏳ Скачиваю видео...\n' +
+      'Функция скачивания скоро будет добавлена!'
+    ).catch(err => console.log('❌ Ошибка:', err.message));
   }
 });
 
-// Тестовый endpoint для проверки
-app.get('/test-webhook', (req, res) => {
-  const testUpdate = {
-    update_id: 123456789,
-    message: {
-      message_id: 1,
-      from: {
-        id: 706357294,
-        first_name: "Test",
-        is_bot: false
-      },
-      chat: {
-        id: 706357294,
-        first_name: "Test",
-        type: "private"
-      },
-      date: Date.now(),
-      text: "/start"
-    }
-  };
+// Webhook endpoint - ВАЖНО: обрабатываем raw body
+app.post(`/bot${token}`, (req, res) => {
+  console.log('📨 POST запрос получен');
   
-  bot.processUpdate(testUpdate);
-  res.send('Тестовый update отправлен');
+  // Логируем заголовки
+  console.log('📋 Content-Type:', req.headers['content-type']);
+  console.log('📦 Raw body длина:', req.rawBody?.length || 0);
+  
+  try {
+    // Пробуем парсить тело
+    let update;
+    if (req.rawBody) {
+      update = JSON.parse(req.rawBody);
+    } else if (req.body && Object.keys(req.body).length > 0) {
+      update = req.body;
+    } else {
+      console.log('⚠️ Нет данных для парсинга');
+      return res.status(400).send('No data');
+    }
+    
+    console.log('🔄 Обрабатываю update ID:', update.update_id);
+    bot.processUpdate(update);
+    console.log('✅ Update обработан');
+    
+    res.sendStatus(200);
+  } catch (error) {
+    console.log('❌ Ошибка парсинга/обработки:', error.message);
+    console.log('📦 Тело запроса:', req.rawBody?.substring(0, 200) || 'Нет тела');
+    res.status(500).send('Error: ' + error.message);
+  }
 });
 
-// Статус страница
+// Статус
 app.get('/', (req, res) => {
   res.send(`
     <h1>🤖 Instagram Reels Bot</h1>
     <p><strong>Статус:</strong> ✅ Работает</p>
-    <p><strong>Webhook:</strong> ${webhookUrl}</p>
-    <p><a href="/test-webhook">Тест webhook</a></p>
+    <p><a href="https://t.me/TgInstaReelsBot">Открыть бота в Telegram</a></p>
   `);
 });
 
