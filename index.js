@@ -8,65 +8,54 @@ const app = express();
 
 app.use(express.json());
 
-console.log('🚀 Бот запущен');
+console.log('🚀 Бот запущен. Токен:', token ? '✅' : '❌');
 
-// Создаем бота БЕЗ автоматической установки webhook
-const bot = new TelegramBot(token);
+// Создаем бота с опциями
+const bot = new TelegramBot(token, {
+  // Добавляем обработку ошибок
+  request: {
+    timeout: 10000
+  }
+});
 
-// Хранилище пользователей
 let users = [];
 
-// Команда /start
-bot.onText(/\/start/, (msg) => {
+// Команда /start с детальным логированием
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from.first_name || 'пользователь';
   
+  console.log(`🎯 /start от ${chatId} (${userName})`);
+  
   if (!users.includes(chatId)) {
     users.push(chatId);
+    console.log(`👤 Добавлен пользователь ${chatId}`);
   }
   
-  console.log(`👤 Новый пользователь: ${chatId} (${userName})`);
-  
-  bot.sendMessage(chatId, 
-    `👋 Привет, ${userName}! Я бот для скачивания Instagram Reels.\n\n` +
-    `Просто пришли мне ссылку на Reels.\n` +
-    `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
-  ).catch(err => {
-    console.log('❌ Ошибка отправки:', err.message);
-  });
-});
-
-// Обработка ссылок
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  
-  if (!text || text.startsWith('/')) return;
-  
-  console.log(`📨 Сообщение от ${chatId}: ${text.substring(0, 50)}...`);
-  
-  if (text.includes('instagram.com/reel/') || text.includes('instagram.com/p/')) {
-    bot.sendMessage(chatId, 
-      '⏳ Скачиваю видео...\n' +
-      'Сейчас функция в разработке. Скоро будет доступно!'
-    ).catch(err => console.log('❌ Ошибка:', err.message));
-  }
-});
-
-// Админ команды
-bot.onText(/\/stats/, (msg) => {
-  if (msg.chat.id === ADMIN_ID) {
-    bot.sendMessage(ADMIN_ID, `📊 Пользователей: ${users.length}`);
+  try {
+    console.log(`📤 Отправляю сообщение ${chatId}...`);
+    const result = await bot.sendMessage(chatId, 
+      `👋 Привет, ${userName}! Я бот для скачивания Instagram Reels.\n\n` +
+      `Просто пришли мне ссылку на Reels.\n` +
+      `Пример: https://www.instagram.com/reel/C4lH6aDrQvL/`
+    );
+    console.log(`✅ Сообщение отправлено ${chatId}, ID: ${result.message_id}`);
+  } catch (error) {
+    console.log(`❌ Ошибка отправки ${chatId}:`, error.message);
+    console.log('Код ошибки:', error.code);
+    console.log('Response:', error.response?.body);
   }
 });
 
 // Webhook endpoint
 app.post(`/bot${token}`, (req, res) => {
+  console.log('📨 Webhook запрос, update_id:', req.body?.update_id);
+  
   try {
     bot.processUpdate(req.body);
     res.sendStatus(200);
   } catch (error) {
-    console.log('❌ Ошибка:', error.message);
+    console.log('❌ Ошибка processUpdate:', error.message);
     res.status(500).send('Error');
   }
 });
@@ -77,7 +66,7 @@ app.get('/', (req, res) => {
     <h1>🤖 Instagram Reels Bot</h1>
     <p><strong>Статус:</strong> ✅ Работает</p>
     <p><strong>Пользователей:</strong> ${users.length}</p>
-    <p><a href="https://t.me/TgInstaReelsBot">Открыть бота</a></p>
+    <p><a href="https://t.me/TgInstaReelsBot">@TgInstaReelsBot</a></p>
   `);
 });
 
